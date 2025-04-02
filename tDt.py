@@ -1,138 +1,135 @@
 import pandas as pd
 import numpy as np
-from sklearn import metrics
 from sklearn.feature_selection import RFECV
 from sklearn.ensemble import IsolationForest
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import StratifiedKFold
-from sklearn.linear_model import LogisticRegression
-from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, confusion_matrix
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.model_selection import StratifiedKFold
-from sklearn.feature_selection import RFECV
-import sys
+
+from Anexos.remove_columns import remove_columns
 
 # Establecimiento de semilla
 np_random_seed = 2
 np.random.seed(2)
 
-
-# Carga y unión de datasets
-normalDt=pd.read_csv("normalDt/normalDt.csv")
+# Carga y filtrado de datasets
+normalDt = pd.read_csv("normalDt/normalDt.csv")
+columns_to_remove_normal = remove_columns(normalDt, 0.9)
 normalDt['label'] = 0
-print("Número de row de normal data")
-print(len(normalDt))
+print("Número de row de normal data:", len(normalDt))
 
-anomalyDt=pd.read_csv("anomalyDt/anomalyDt.csv")
+anomalyDt = pd.read_csv("anomalyDt/anomalyDt-fus-rec-tcpdump.pcap_Flow.csv")
+columns_to_remove_anomaly = remove_columns(anomalyDt, 0.9)
 anomalyDt['label'] = 1
-print("Número de row de metasploit")
-print(len(anomalyDt.index))
-print("Datos cargados")
+print("Número de row de metasploit:", len(anomalyDt))
+
+columns_to_remove = columns_to_remove_normal | columns_to_remove_anomaly
+print(columns_to_remove)
+print("Número de columnas a eliminar:", len(columns_to_remove))
 
 # Concatenación de datasets
-dt = pd.concat([normalDt, anomalyDt], axis=0, ignore_index= True)
-print("Número de row de fusionados")
-print(len(dt))
-
-dt.to_csv(r"dtcm.csv",encoding='utf-8', index= False)
-
-# Variables que no varían
-
-dt_notNan = dt.drop(['bwd_pkt_len_max', 'bwd_pkt_len_min', 'pkt_len_max', 'pkt_len_min', 'fwd_seg_size_min',
-             'fwd_urg_flags', 'bwd_urg_flags', 'rst_flag_cnt', 'urg_flag_cnt', 'ece_flag_cnt',
-             'active_max','active_min', 'active_std', 'fwd_byts_b_avg', 'fwd_pkts_b_avg', 'bwd_byts_b_avg',
-              'fwd_blk_rate_avg', 'bwd_blk_rate_avg' , 'cwr_flag_count'], axis=1)
-
+dt = pd.concat([normalDt, anomalyDt], axis=0, ignore_index=True)
+dt_new = dt.drop(columns_to_remove, axis=1)
+print("Número de filas fusionadas:", len(dt))
 
 # Limpieza de columnas irrelevantes
-dt_new = dt_notNan.drop(['src_ip', 'dst_ip', 'timestamp'], axis=1)
+dt_new = dt_new.drop(['Flow ID', 'Src IP', 'Dst IP', 'Timestamp'], axis=1)
 
-# Limpieza de valores negativos en flow_duration
-dt_new = dt_new[dt_new['flow_duration'] >= 0]
-
-
-# Isolation_Forest
-variable1 = ['flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'totlen_fwd_pkts', 'totlen_bwd_pkts', 
-             'fwd_pkt_len_max', 'fwd_pkt_len_min', 'fwd_pkt_len_mean', 'fwd_pkt_len_std']
-variable2 = ['bwd_pkt_len_mean', 'bwd_pkt_len_std', 'flow_byts_s', 'flow_pkts_s', 'flow_iat_mean',
-             'flow_iat_std', 'flow_iat_max', 'flow_iat_min', 'fwd_iat_tot', 'fwd_iat_mean', 'fwd_iat_std']
-variable3 = ['fwd_iat_max', 'fwd_iat_min', 'bwd_iat_tot', 'bwd_iat_mean', 'bwd_iat_std', 'bwd_iat_max',
-             'bwd_iat_min', 'fwd_header_len', 'bwd_header_len']
-variable4 = ['fwd_pkts_s', 'bwd_pkts_s', 'pkt_len_mean', 'pkt_len_std', 'pkt_len_var',
-             'fin_flag_cnt', 'syn_flag_cnt', 'psh_flag_cnt']
+dt_new = dt_new[dt_new['Flow Duration'] >= 0]
 
 
+dt_new.to_csv(r"dt_pre_matrix_red.csv", encoding='utf-8', index=False)
+
+print("Atributos a entrenar: ", set(dt_new.columns))
+
+
+
+variable1 = ['Flow Duration', 'Flow Byts/s', 'Flow Pkts/s', 'Flow IAT Mean', 
+            'Flow IAT Min', 'Flow IAT Max', 'Flow IAT Std','TotLen Fwd Pkts', 'TotLen Bwd Pkts', 
+            'Tot Fwd Pkts', 'Tot Bwd Pkts']
+
+variable2 = ['Fwd Pkt Len Mean', 'Fwd Pkt Len Max', 'Fwd Pkt Len Std', 
+            'Bwd Pkt Len Mean', 'Bwd Pkt Len Std', 'Bwd Pkt Len Max', 
+            'Pkt Len Std', 'Pkt Len Mean', 'Pkt Len Max', 'Pkt Size Avg', 
+            'Pkt Len Var']
+
+variable3 = ['SYN Flag Cnt', 'FIN Flag Cnt', 'PSH Flag Cnt', 'ACK Flag Cnt', 
+            'Protocol', 'Dst Port', 'Src Port', 'Down/Up Ratio']
+
+variable4 = ['Init Fwd Win Byts', 'Init Bwd Win Byts', 'Fwd Seg Size Avg', 
+            'Fwd Seg Size Min', 'Bwd Seg Size Avg', 
+            'Fwd IAT Mean', 'Fwd IAT Min', 'Fwd IAT Max', 'Fwd IAT Std', 
+            'Fwd Act Data Pkts', 'Subflow Fwd Byts', 'Subflow Bwd Byts']
+
+
+# Isolation Forest
 model = IsolationForest(n_estimators=50, max_samples='auto', contamination=0.01, max_features=8, random_state=1)
 
+# Aplicar Isolation Forest por grupos
 for group in [variable1, variable2, variable3, variable4]:
     model.fit(dt_new[group])
     dt_new['anomaly'] = model.predict(dt_new[group])
-    dt_new = dt_new[dt_new['anomaly'] == 1]
+    dt_new = dt_new[dt_new['anomaly'] == 1]  
     dt_new = dt_new.drop(['anomaly'], axis=1) 
 
 
-
-# Atributos redundantes -> Matriz de Correlación
+'''
+# Matriz de Correlación
 
 # Flow Duration -> Duración total del flujo
-# ------ Fwd IAT Tot - 0.99 -> Tiempo total entre paquetes enviados en dirección forward
-dt_new = dt_new.drop(['fwd_iat_tot'], axis=1)
+# ------ Flow Duration - 0.99 -> Redundante con Bwd IAT Tot, que representa el tiempo total entre paquetes de respuesta
+dt_new = dt_new.drop(['Flow Duration'], axis=1)
 
-# Flow Pkts/s -> Número total de paquetes por segundo en el flujo
-# ------ Fwd Pkts/s - 0.97 -> Paquetes por segundo enviados en dirección forward
-dt_new = dt_new.drop(['fwd_pkts_s'], axis=1)
+# Fwd Header Len -> Longitud total de los encabezados de los paquetes de reenvío
+# ------ Fwd Header Len - 0.99 -> Redundante con Tot Fwd Pkts, que ya contiene la cantidad total de paquetes reenviados
+dt_new = dt_new.drop(['Fwd Header Len'], axis=1)
 
-# Tot Fwd Pkts -> Número total de paquetes enviados en dirección forward
-# ------ Subflow Fwd Pkts - 1.00 -> Número medio de paquetes enviados en subflow dirección forward
-dt_new = dt_new.drop(['subflow_fwd_pkts'], axis=1)
+# Bwd Header Len -> Longitud total de los encabezados de los paquetes de respuesta
+# ------ Bwd Header Len - 0.98 -> Redundante con Tot Bwd Pkts, que ya mide el total de paquetes de respuesta
+dt_new = dt_new.drop(['Bwd Header Len'], axis=1)
 
-# Tot Bwd Pkts -> Número total de paquetes enviados en dirección backward
-# ------ Subflow Bwd Pkts - 1.00 -> Número medio de paquetes enviados en subflow dirección backward
-dt_new = dt_new.drop(['subflow_bwd_pkts'], axis=1)
+# Fwd Act Data Pkts -> Número de paquetes de datos activos enviados en dirección forward
+# ------ Fwd Act Data Pkts - 0.99 -> Redundante con TotLen Fwd Pkts, que representa el tamaño total de los paquetes reenviados
+dt_new = dt_new.drop(['Fwd Act Data Pkts'], axis=1)
 
-# TotLen Fwd Pkts -> Tamaño total de los paquetes en dirección forward
-# ------ Subflow Fwd Byts - 1.00 -> Tamaño medio de bytes en subflow dirección forward
-dt_new = dt_new.drop(['subflow_fwd_byts'], axis=1)
+# Fwd Seg Size Avg -> Tamaño promedio de los segmentos reenviados
+# ------ Fwd Seg Size Avg - 1.00 -> Redundante con Fwd Pkt Len Mean, que ya mide el tamaño promedio de los paquetes reenviados
+dt_new = dt_new.drop(['Fwd Seg Size Avg'], axis=1)
 
-# TotLen Bwd Pkts -> Tamaño total de los paquetes en dirección backward
-# ------ Subflow Bwd Byts - 1.00 -> Tamaño medio de bytes en subflow dirección backward
-dt_new = dt_new.drop(['subflow_bwd_byts'], axis=1)
+# Bwd Seg Size Avg -> Tamaño promedio de los segmentos de respuesta
+# ------ Bwd Seg Size Avg - 1.00 -> Redundante con Bwd Pkt Len Mean, que mide el tamaño promedio de los paquetes de respuesta
+dt_new = dt_new.drop(['Bwd Seg Size Avg'], axis=1)
 
-# Fwd Pkt Len Mean -> Tamaño medio de paquete en dirección forward
-# ------ Fwd Seg Size Avg - 1.00 -> Tamaño medio observado en dirección forward
-dt_new = dt_new.drop(['fwd_seg_size_avg'], axis=1)
+# Flow Pkts/s -> Número de paquetes por segundo en el flujo
+# ------ Flow Pkts/s - 0.99 -> Redundante con Fwd Pkts/s y Bwd Pkts/s, que separan la velocidad de envío y recepción
+dt_new = dt_new.drop(['Flow Pkts/s'], axis=1)
 
-# Bwd Pkt Len Mean -> Tamaño medio de paquete en dirección backward
-# ------ Bwd Seg Size Avg - 1.00 -> Tamaño medio observado en dirección backward
-dt_new = dt_new.drop(['bwd_seg_size_avg'], axis=1)
+# Flow IAT Max -> Mayor tiempo entre paquetes en el flujo
+# ------ Flow IAT Max - 0.99 -> Redundante con Fwd IAT Max y Bwd IAT Max, que desglosan los tiempos de inactividad por dirección
+dt_new = dt_new.drop(['Flow IAT Max'], axis=1)
 
-# Pkt Len Mean -> Tamaño medio del paquete
-# ------ Pkt Size Avg - 1.00 -> Tamaño promedio del paquete
-dt_new = dt_new.drop(['pkt_size_avg'], axis=1)
+# Fwd IAT Tot -> Tiempo total entre paquetes en dirección forward
+# ------ Fwd IAT Tot - 0.99 -> Redundante con Fwd IAT Max y Bwd IAT Tot, que ofrecen una mejor distribución del tiempo
+dt_new = dt_new.drop(['Fwd IAT Tot'], axis=1)
 
-# Ack Flag Cnt -> Número de paquetes con flag ACK
-# ------ Tot Fwd Pkts - 0.98 -> Número total de paquetes enviados en dirección forward
-dt_new = dt_new.drop(['ack_flag_cnt'], axis=1)
+# Idle Mean -> Tiempo medio de inactividad en la conexión
+# ------ Idle Mean - 0.99 -> Redundante con Idle Max e Idle Min, que ofrecen valores más representativos de la inactividad
+dt_new = dt_new.drop(['Idle Mean'], axis=1)
 
-# Idle Max -> Tiempo máximo que el flujo estuvo inactivo
-# ------ Idle Mean - 0.98 -> Tiempo promedio que el flujo estuvo inactivo
-dt_new = dt_new.drop(['idle_mean'], axis=1)
+# Pkt Size Avg -> Tamaño medio de los paquetes
+# ------ Pkt Size Avg - 0.99 -> Redundante con Pkt Len Mean, que ya mide el tamaño promedio de los paquetes de manera estándar
+dt_new = dt_new.drop(['Pkt Size Avg'], axis=1)
+'''
+# Reemplazar inf y -inf por NaN y eliminar filas con NaN
+dt_post_rf = dt_new.replace([np.inf, -np.inf], np.nan)
 
-# Active Max -> Tiempo máximo de actividad en el flujo
-# ------ Active Mean - 0.98 -> Tiempo promedio de actividad en el flujo
-dt_new = dt_new.drop(['active_mean'], axis=1)
+dt_post_rf = dt_post_rf.dropna()  # Eliminar filas con NaN
 
 
 
+target = dt_post_rf['label']  
+X = dt_post_rf.drop('label', axis=1)
 
-target = dt_new['label']  
-X = dt_new.drop('label', axis=1)
-
-# Crear el modelo y RFECV
+#RFECV
 rfecv = RFECV(estimator=RandomForestClassifier(random_state=0), step=1, 
               cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=3), 
               scoring='accuracy', verbose=4, min_features_to_select=1)
@@ -141,14 +138,12 @@ rfecv.fit(X, target)
 
 selected_columns = X.columns[rfecv.support_].tolist()
 selected_columns.append('label') 
-print(selected_columns)
-dt_new = dt_new[selected_columns]
+print("Columnas seleccionadas por RFECV:", selected_columns)
 
-dt_new.reset_index(inplace=True,drop=True)
-#FIN-RFECV
+dt_post_matrix = dt_post_rf[selected_columns]
+print("Dataset final tras RFECV:")
 
-print("Número de row final")
-print(len(dt_new.index))
+dt_post_matrix.reset_index(inplace=True, drop=True)
 
-dt_new.to_csv(r"resultado.csv",encoding='utf-8', index= False)
-print("Se guarda el dataset")
+dt_post_matrix.to_csv(r"resultado-reducido.csv", encoding='utf-8', index=False)
+print("Se guarda el dataset final")
